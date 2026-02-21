@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber Tank: Pro Challenge</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap');
+        body { margin: 0; background: #000; color: #fff; font-family: 'Orbitron', sans-serif; overflow: hidden; }
+        .hud { position: absolute; top: 0; width: 100%; padding: 20px; display: flex; justify-content: space-around; z-index: 10; pointer-events: none; }
+        .stat-box { background: rgba(0,0,0,0.85); border: 2px solid #00f2ff; padding: 10px 25px; border-radius: 10px; box-shadow: 0 0 15px #00f2ff; text-align: center; min-width: 150px; }
+        #overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 200; backdrop-filter: blur(15px); }
+        .main-card { background: rgba(15,15,20,0.9); border: 2px solid #00f2ff; padding: 30px; border-radius: 20px; box-shadow: 0 0 40px rgba(0, 242, 255, 0.3); text-align: center; width: 380px; }
+        h1 { font-size: 24px; color: #00f2ff; text-shadow: 0 0 20px #00f2ff; margin-bottom: 20px; }
+        input { width: 100%; padding: 12px; background: #111; border: 1px solid #00f2ff; color: #fff; font-family: 'Orbitron'; margin-bottom: 15px; border-radius: 5px; text-align: center; outline: none; }
+        .diff-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .btn { padding: 10px; background: none; border: 2px solid #00f2ff; color: #00f2ff; font-family: 'Orbitron'; font-size: 12px; font-weight: 700; cursor: pointer; border-radius: 5px; transition: 0.3s; }
+        .btn:hover, .btn.active { background: #00f2ff; color: #000; box-shadow: 0 0 15px #00f2ff; }
+        .btn-start { width: 100%; padding: 15px; background: #ff0055; border: none; color: #fff; font-family: 'Orbitron'; font-weight: 900; cursor: pointer; border-radius: 5px; margin-top: 10px; }
+        .leaderboard { margin-top: 20px; text-align: left; border-top: 1px solid #333; padding-top: 10px; font-size: 12px; }
+        .rank-item { display: flex; justify-content: space-between; padding: 3px 0; color: #00f2ff; }
+    </style>
+</head>
+<body>
+
+    <div class="hud">
+        <div class="stat-box"><span id="uName">PLAYER</span>: <span id="s1">0</span><br><small id="p1-status">READY</small></div>
+        <div class="stat-box" style="border-color: #ff0055; color: #ff0055;">BOT: <span id="s2">0</span><br><small id="p2-status">READY</small></div>
+    </div>
+
+    <div id="overlay">
+        <div class="main-card">
+            <h1 id="win-text">CYBER ARENA</h1>
+            <input type="text" id="playerName" placeholder="ISMINGIZ" maxlength="10">
+            
+            <div style="font-size: 10px; margin-bottom: 10px; color: #888;">BOT QIYINLIGI:</div>
+            <div class="diff-container">
+                <button class="btn active" onclick="setDiff('easy', this)">OSON</button>
+                <button class="btn" onclick="setDiff('medium', this)">O'RTA</button>
+                <button class="btn" onclick="setDiff('hard', this)">QIYIN</button>
+                <button class="btn" onclick="setDiff('insane', this)" style="border-color: #ff0055; color: #ff0055;">HACKER</button>
+            </div>
+
+            <button class="btn-start" onclick="preStart()">JANGNI BOSHLASH</button>
+            
+            <div class="leaderboard">
+                <div style="color: #ffeb3b; margin-bottom: 5px;">TOP REKORDLAR:</div>
+                <div id="topList"></div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="game"></canvas>
+
+    <script>
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d");
+        const overlay = document.getElementById("overlay");
+        const nameInput = document.getElementById("playerName");
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let active = false, score1 = 0, score2 = 0, userNick = "Pilot";
+        let difficulty = { speed: 2.5, turn: 0.04, fireRate: 0.01, evade: false };
+        const keys = {};
+        let walls = [], powerups = [];
+
+        function setDiff(level, el) {
+            document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+            el.classList.add('active');
+            if(level === 'easy') difficulty = { speed: 2, turn: 0.03, fireRate: 0.005, evade: false };
+            if(level === 'medium') difficulty = { speed: 3, turn: 0.05, fireRate: 0.015, evade: false };
+            if(level === 'hard') difficulty = { speed: 4, turn: 0.07, fireRate: 0.03, evade: true };
+            if(level === 'insane') difficulty = { speed: 5.5, turn: 0.1, fireRate: 0.06, evade: true };
+        }
+
+        function preStart() {
+            userNick = nameInput.value.trim() || "User";
+            document.getElementById('uName').innerText = userNick.toUpperCase();
+            overlay.style.display = "none";
+            startGame();
+        }
+
+        function generateMap() {
+            walls = [];
+            for(let i=0; i<6; i++) {
+                walls.push({ x: Math.random()*(canvas.width-300)+150, y: Math.random()*(canvas.height-300)+150, w: Math.random()>0.5?30:150, h: Math.random()>0.5?150:30 });
+            }
+        }
+
+        class Tank {
+            constructor(x, y, color, controls, isBot) {
+                this.x = x; this.y = y; this.color = color; this.angle = isBot?Math.PI:0;
+                this.controls = controls; this.isBot = isBot;
+                this.bullets = []; this.vel = 0; this.shield = false;
+            }
+            draw() {
+                ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+                if(this.shield) { ctx.beginPath(); ctx.arc(0,0,40,0,7); ctx.strokeStyle="#fff"; ctx.stroke(); }
+                ctx.strokeStyle = this.color; ctx.lineWidth = 3; ctx.strokeRect(-20, -15, 40, 30);
+                ctx.fillStyle = this.color; ctx.fillRect(0, -3, 35, 6);
+                ctx.restore();
+                this.bullets.forEach((b, i) => {
+                    b.x += Math.cos(b.angle)*12; b.y += Math.sin(b.angle)*12;
+                    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, 7); ctx.fill();
+                    if(walls.some(w => b.x>w.x && b.x<w.x+w.w && b.y>w.y && b.y<w.y+w.h)) this.bullets.splice(i, 1);
+                });
+            }
+            update(target) {
+                if(this.isBot) {
+                    let angleTo = Math.atan2(target.y - this.y, target.x - this.x);
+                    let diff = angleTo - this.angle;
+                    while(diff < -Math.PI) diff += Math.PI*2; while(diff > Math.PI) diff -= Math.PI*2;
+                    this.angle += diff * difficulty.turn;
+                    this.vel = difficulty.speed;
+
+                    // Evade logic for Hard/Insane
+                    if(difficulty.evade) {
+                        target.bullets.forEach(b => {
+                            if(Math.hypot(b.x-this.x, b.y-this.y) < 120) this.angle += 0.2;
+                        });
+                    }
+                    if(Math.random() < difficulty.fireRate) this.fire();
+                } else {
+                    if(keys[this.controls.up]) this.vel = 5; else if(keys[this.controls.down]) this.vel = -3; else this.vel *= 0.95;
+                    if(keys[this.controls.left]) this.angle -= 0.07; if(keys[this.controls.right]) this.angle += 0.07;
+                }
+                let nx = this.x + Math.cos(this.angle)*this.vel, ny = this.y + Math.sin(this.angle)*this.vel;
+                if(!walls.some(w => nx+25>w.x && nx-25<w.x+w.w && ny+25>w.y && ny-25<w.y+w.h) && nx>30 && nx<canvas.width-30 && ny>30 && ny<canvas.height-30) {
+                    this.x = nx; this.y = ny;
+                } else { this.vel = 0; if(this.isBot) this.angle += 0.1; }
+
+                target.bullets.forEach((b, i) => {
+                    if(Math.hypot(b.x-this.x, b.y-this.y) < 28) {
+                        target.bullets.splice(i,1);
+                        if(this.shield) this.shield = false; else finishGame(this.isBot?"USER":"BOT");
+                    }
+                });
+            }
+            fire() { if(this.bullets.length < 10) this.bullets.push({x:this.x, y:this.y, angle:this.angle}); }
+        }
+
+        let p1, p2;
+        function startGame() {
+            generateMap();
+            p1 = new Tank(100, canvas.height/2, "#00f2ff", {up:87, down:83, left:65, right:68}, false);
+            p2 = new Tank(canvas.width-100, canvas.height/2, "#ff0055", {}, true);
+            active = true;
+        }
+
+        function finishGame(winner) {
+            active = false;
+            if(winner === "USER") { score1++; saveRec(userNick, score1); } else score2++;
+            document.getElementById("s1").innerText = score1;
+            document.getElementById("s2").innerText = score2;
+            document.getElementById("win-text").innerText = (winner==="USER"?userNick:"BOT") + " YUTDI!";
+            overlay.style.display = "flex";
+        }
+
+        function saveRec(n, s) {
+            let d = JSON.parse(localStorage.getItem('tankRec') || '{}');
+            if(!d[n] || s > d[n]) d[n] = s;
+            localStorage.setItem('tankRec', JSON.stringify(d));
+            upRec();
+        }
+
+        function upRec() {
+            let d = JSON.parse(localStorage.getItem('tankRec') || '{}');
+            let s = Object.entries(d).sort((a,b)=>b[1]-a[1]).slice(0,5);
+            document.getElementById('topList').innerHTML = s.map(([n,sc])=>`<div class="rank-item"><span>${n}</span><span>${sc}</span></div>`).join('');
+        }
+
+        window.onkeydown = e => { keys[e.keyCode] = true; if(active && e.keyCode===70) p1.fire(); };
+        window.onkeyup = e => keys[e.keyCode] = false;
+
+        function loop() {
+            ctx.fillStyle = "#000"; ctx.fillRect(0,0,canvas.width,canvas.height);
+            ctx.fillStyle = "#1a1a1a"; walls.forEach(w => ctx.fillRect(w.x, w.y, w.w, w.h));
+            if(active) { p1.update(p2); p2.update(p1); }
+            if(p1) p1.draw(); if(p2) p2.draw();
+            requestAnimationFrame(loop);
+        }
+        upRec(); loop();
+    </script>
+</body>
+</html>
